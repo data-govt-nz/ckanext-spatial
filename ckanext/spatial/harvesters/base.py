@@ -24,6 +24,7 @@ from ckan.lib.helpers import json
 from ckan import logic
 from ckan.lib.navl.validators import not_empty
 from ckan.lib.search.index import PackageSearchIndex
+from ckanext.harvest.harvesters.base import munge_tag
 
 from ckanext.harvest.harvesters.base import HarvesterBase
 from ckanext.harvest.model import HarvestObject
@@ -144,12 +145,21 @@ class SpatialHarvester(HarvesterBase):
             if 'default_tags' in source_config_obj:
                 if not isinstance(source_config_obj['default_tags'],list):
                     raise ValueError('default_tags must be a list')
+                elif not isinstance(source_config_obj['default_tags'][0], dict):
+                    # This check is taken from ckanext-harvest CKANHarvester to ensure consistency
+                    # between harversters.
+                    raise ValueError('default_tags must be a list of dicts like {"name": "name-of-tag"}')
 
             if 'default_extras' in source_config_obj:
                 if not isinstance(source_config_obj['default_extras'],dict):
                     raise ValueError('default_extras must be a dictionary')
 
-            for key in ('override_extras'):
+            if 'default_groups' in source_config_obj:
+                # Also taken from CKANHarvester to ensure consistency.
+                if not isinstance(source_config_obj['default_groups'], list):
+                    raise ValueError('default_groups must be a *list* of group names/ids')
+
+            for key in ('override_extras', 'clean_tags'):
                 if key in source_config_obj:
                     if not isinstance(source_config_obj[key],bool):
                         raise ValueError('%s must be boolean' % key)
@@ -202,24 +212,37 @@ class SpatialHarvester(HarvesterBase):
         :returns: A dataset dictionary (package_dict)
         :rtype: dict
         '''
-
+        
         tags = []
-        if 'tags' in iso_values:
-            for tag in iso_values['tags']:
-                tag = tag[:50] if len(tag) > 50 else tag
-                tags.append({'name': tag})
 
-        # Add default_tags from config
-        default_tags = self.source_config.get('default_tags',[])
-        if default_tags:
-           for tag in default_tags:
-              tags.append({'name': tag})
+        if 'tags' in iso_values:
+            do_clean = self.source_config.get('clean_tags')
+            tags_val = [munge_tag(tag) if do_clean else tag[:100] for tag in iso_values['tags']]
+            tags = [{'name': tag} for tag in tags_val]
+
+
+        # Add default_tags from config.
+        # For consistency with CKANHarvester `default_tags` is now a list of
+        # dicts, which we can add to tags without further parsing.
+        tags.extend(self.source_config.get('default_tags', []))
+
+        # Adding default_groups from config. This was previously not supported
+        # by ckanext-spatial.
+        context = {'model': model, 'user': p.toolkit.c.user}
+        groups = []
+        for group_name_or_id in self.source_config.get('default_groups', []):
+            try:
+                group = p.toolkit.get_action('group_show')(context, {'id': group_name_or_id})
+                groups.append({'id': group['id'], 'name': group['name']})
+            except p.toolkit.ObjectNotFound, e:
+                logging.error('Default group %s not found, proceeding without.' % group_name_or_id)
 
         package_dict = {
             'title': iso_values['title'],
             'notes': iso_values['abstract'],
-            'tags': tags,
+            'tags': dict((tag['name'], tag) for tag in tags).values(),
             'resources': [],
+            'groups': dict((group['id'], group) for group in groups).values(),
         }
 
         # We need to get the owner organization (if any) from the harvest
