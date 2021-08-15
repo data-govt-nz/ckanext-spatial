@@ -236,7 +236,7 @@ class SpatialHarvester(HarvesterBase):
             try:
                 group = p.toolkit.get_action('group_show')(context, {'id': group_name_or_id})
                 groups.append({'id': group['id'], 'name': group['name']})
-            except p.toolkit.ObjectNotFound, e:
+            except p.toolkit.ObjectNotFound:
                 logging.error('Default group %s not found, proceeding without.' % group_name_or_id)
 
         package_dict = {
