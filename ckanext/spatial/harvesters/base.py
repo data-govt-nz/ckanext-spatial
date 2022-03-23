@@ -230,7 +230,7 @@ class SpatialHarvester(HarvesterBase):
 
         # Adding default_groups from config. This was previously not supported
         # by ckanext-spatial.
-        context = {'model': model, 'user': p.toolkit.c.user}
+        context = {'model': model, 'session': model.Session, 'user': self._get_user_name()}
         groups = []
         for group_name_or_id in self.source_config.get('default_groups', []):
             try:
